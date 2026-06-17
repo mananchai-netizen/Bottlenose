@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.claude
+.docs
+.tmp-han-runtime/
+uploads.db.bak
+hello-world.html
+Dockerfile.fly-worker-once
+railway.worker-once.json
+deploy/fly-worker-once-demo/
+docs/deployment.md
+docs/railway-worker-once.md
+.vercel

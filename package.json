@@ -1,0 +1,28 @@
+{
+  "name": "han-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.13.0",
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/ui",
+    "local": "npm run dev:local",
+    "dev:local": "cross-env NOTION_WEBHOOK_ALLOW_UNSIGNED_DEV=1 npm run dev -w apps/ui",
+    "build": "npm run build -w packages/agent && npm run build -w apps/ui",
+    "typecheck": "tsc --noEmit -p packages/agent/tsconfig.json && tsc --noEmit -p apps/ui/tsconfig.json",
+    "agent:start": "npm run start -w packages/agent",
+    "agent:dev": "npm run dev -w packages/agent",
+    "line-bot:dev": "npx tsx src/line-bot/server.ts",
+    "line-bot:start": "node --import=tsx/esm src/line-bot/server.ts"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}

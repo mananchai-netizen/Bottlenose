@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "buildCommand": "node apps/ui/scripts/patch-vercel-sandbox.mjs && npm run build -w packages/agent && npm run build -w apps/ui",
+  "outputDirectory": "apps/ui/.next"
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@han-ai/ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:seed": "node scripts/seed-neon.mjs",
+    "postinstall": "node scripts/patch-vercel-sandbox.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "3.0.81",
+    "@ai-sdk/openai-compatible": "2.0.48",
+    "@ai-sdk/react": "3.0.199",
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@notionhq/client": "^2.3.0",
+    "@vercel/sandbox": "2.1.1",
+    "@workflow/ai": "5.0.0",
+    "ai": "6.0.197",
+    "bcryptjs": "3.0.3",
+    "googleapis": "^171.4.0",
+    "ioredis": "^5.10.1",
+    "next": "16.2.6",
+    "pg": "^8.13.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "typeorm": "1.0.0",
+    "workflow": "4.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "2.4.6",
+    "@types/node": "^20",
+    "@types/pg": "^8.11.10",
+    "@types/ws": "^8.5.13",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,16 @@
+# Han AI — RunPod Qwen3.7-Max (vLLM inference only)
+# Deploy as RunPod Serverless GPU Endpoint
+# ไม่มี task logic — เป็นแค่ LLM endpoint เท่านั้น
+FROM vllm/vllm-openai:latest
+
+ENV HF_HOME=/workspace/huggingface
+ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+EXPOSE 8000
+
+CMD ["--model", "Qwen/Qwen3-7B", \
+     "--port", "8000", \
+     "--dtype", "bfloat16", \
+     "--max-model-len", "32768", \
+     "--trust-remote-code", \
+     "--enable-prefix-caching"]
