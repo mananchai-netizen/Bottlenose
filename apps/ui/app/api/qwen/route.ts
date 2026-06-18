@@ -1,5 +1,8 @@
 import { callQwen } from '@/lib/qwen-brain'
 
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   try {
     const { system, user } = (await req.json()) as { system?: string; user: string }
