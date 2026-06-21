@@ -3,5 +3,11 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "node apps/ui/scripts/patch-vercel-sandbox.mjs && npm run build -w packages/agent && npm run build -w apps/ui",
-  "outputDirectory": "apps/ui/.next"
+  "outputDirectory": "apps/ui/.next",
+  "crons": [
+    {
+      "path": "/api/cron/renew-drive-watch",
+      "schedule": "0 0 */6 * *"
+    }
+  ]
 }
