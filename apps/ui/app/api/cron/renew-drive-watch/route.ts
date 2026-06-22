@@ -15,10 +15,7 @@ interface ChannelRecord {
 
 function createDriveAuth() {
   const clientJson = process.env.GOOGLE_OAUTH_CLIENT_JSON
-  const tokenPath  = process.env.GOOGLE_OAUTH_TOKEN_PATH
   if (!clientJson) throw new Error('GOOGLE_OAUTH_CLIENT_JSON not set')
-  if (!tokenPath)  throw new Error('GOOGLE_OAUTH_TOKEN_PATH not set')
-  if (!existsSync(tokenPath)) throw new Error(`OAuth token file not found: ${tokenPath}`)
 
   const parsed = JSON.parse(clientJson) as {
     installed?: { client_id?: string; client_secret?: string }
@@ -28,7 +25,18 @@ function createDriveAuth() {
   if (!cfg?.client_id || !cfg.client_secret) throw new Error('Invalid GOOGLE_OAUTH_CLIENT_JSON')
 
   const oauth2 = new google.auth.OAuth2(cfg.client_id, cfg.client_secret)
-  oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+
+  const tokenJson = process.env.GOOGLE_OAUTH_TOKEN_JSON
+  const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH
+
+  if (tokenJson) {
+    oauth2.setCredentials(JSON.parse(tokenJson) as object)
+  } else if (tokenPath && existsSync(tokenPath)) {
+    oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+  } else {
+    throw new Error('Set GOOGLE_OAUTH_TOKEN_JSON (Vercel) or GOOGLE_OAUTH_TOKEN_PATH (local)')
+  }
+
   return oauth2
 }
 

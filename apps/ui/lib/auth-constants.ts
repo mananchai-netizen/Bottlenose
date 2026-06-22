@@ -15,14 +15,12 @@ export const ROLE_MENUS: Record<Role, { href: string; label: string }[]> = {
     { href: '/', label: 'Status' },
     { href: '/config', label: 'Config' },
     { href: '/projects', label: 'Projects' },
-    { href: '/plan', label: 'Plan Tasks' },
     { href: '/users', label: 'Users' },
-    { href: '/qwen', label: 'Qwen' },
   ],
   admin: [{ href: '/projects', label: 'Projects' }],
 }
 
 export const ROLE_ALLOWED_PATHS: Record<Role, string[]> = {
-  root:  ['/', '/config', '/projects', '/plan', '/users', '/qwen'],
+  root:  ['/', '/config', '/projects', '/users'],
   admin: ['/projects'],
 }

@@ -1,4 +1,6 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Client as NotionClient } from '@notionhq/client'
 import { google } from 'googleapis'
 import mammoth from 'mammoth'
@@ -35,10 +37,7 @@ export interface PlanResult {
 
 function createDriveAuth() {
   const clientJson = process.env.GOOGLE_OAUTH_CLIENT_JSON
-  const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH
   if (!clientJson) throw new Error('GOOGLE_OAUTH_CLIENT_JSON not set')
-  if (!tokenPath) throw new Error('GOOGLE_OAUTH_TOKEN_PATH not set')
-  if (!existsSync(tokenPath)) throw new Error(`OAuth token file not found: ${tokenPath}`)
 
   const parsed = JSON.parse(clientJson) as {
     installed?: { client_id?: string; client_secret?: string }
@@ -48,7 +47,20 @@ function createDriveAuth() {
   if (!clientConfig?.client_id || !clientConfig.client_secret) throw new Error('Invalid GOOGLE_OAUTH_CLIENT_JSON')
 
   const oauth2 = new google.auth.OAuth2(clientConfig.client_id, clientConfig.client_secret)
-  oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+
+  // GOOGLE_OAUTH_TOKEN_JSON = token JSON string directly (Vercel / no filesystem)
+  // GOOGLE_OAUTH_TOKEN_PATH = path to token file (local dev)
+  const tokenJson = process.env.GOOGLE_OAUTH_TOKEN_JSON
+  const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH
+
+  if (tokenJson) {
+    oauth2.setCredentials(JSON.parse(tokenJson) as object)
+  } else if (tokenPath && existsSync(tokenPath)) {
+    oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+  } else {
+    throw new Error('Set GOOGLE_OAUTH_TOKEN_JSON (Vercel) or GOOGLE_OAUTH_TOKEN_PATH (local)')
+  }
+
   return oauth2
 }
 

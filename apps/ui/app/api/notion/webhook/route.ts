@@ -98,6 +98,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           Authorization: `Bearer ${CRON_SECRET}`,
         },
       })
+      const contentType = res.headers.get('content-type') ?? ''
+      if (!res.ok || !contentType.includes('application/json')) {
+        const body = await res.text()
+        console.error('[notion/webhook] poll error', res.status, body.slice(0, 200))
+        return
+      }
       const data = await res.json() as unknown
       console.log('[notion/webhook] poll result:', JSON.stringify(data))
     } catch (e: unknown) {
