@@ -1,16 +1,15 @@
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFileSync, existsSync } from 'node:fs'
 import { Client as NotionClient } from '@notionhq/client'
-import { google } from 'googleapis'
+import { google, Auth } from 'googleapis'
+import type { drive_v3 } from 'googleapis'
 import mammoth from 'mammoth'
 import { callBrain } from './call-brain'
 
-const PLAN_SYSTEM_PROMPT = `You are Han AI planning agent. Extract tasks from Google Drive content.
+const PLAN_SYSTEM_PROMPT = `You are Han AI planning agent. Extract tasks from a single document.
 Return ONLY a compact JSON array (no whitespace, no markdown, no explanation).
 Each task: {"title":"...","type":"dev|doc|sheet|slide","status":"New","priority":1,"context":"..."}
-Rules: use content only, no duplicates, keep context under 100 chars, max 8 tasks.
-- Keep titles concise and imperative.`
+Rules: use content only, no duplicates, keep context under 100 chars.
+Keep titles concise and imperative. Extract ALL meaningful tasks from the document.`
 
 const MAX_CONTENT_CHARS = 8_000
 const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{25,44}$/
@@ -18,6 +17,7 @@ const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{25,44}$/
 interface CloudProject {
   notion_db_id: string
   google_drive_folder_id?: string
+  google_drive_file_id?: string
 }
 
 interface PlannedTask {
@@ -65,95 +65,129 @@ function createDriveAuth() {
 }
 
 interface DriveFile { id: string; name: string }
-interface ReadResult { content: string; files: DriveFile[] }
+interface DriveFileWithContent extends DriveFile { content: string }
 
-async function readDriveFolder(folderId: string): Promise<ReadResult> {
+async function extractFileContent(
+  fileId: string,
+  mimeType: string,
+  name: string,
+  auth: Auth.OAuth2Client,
+  drive: drive_v3.Drive,
+): Promise<string> {
+  if (mimeType === 'application/vnd.google-apps.document') {
+    const docs = google.docs({ version: 'v1', auth })
+    const doc = await docs.documents.get({ documentId: fileId })
+    const parts: string[] = []
+    for (const el of doc.data.body?.content ?? []) {
+      for (const pe of el.paragraph?.elements ?? []) {
+        const text = (pe as { textRun?: { content?: string } }).textRun?.content
+        if (text) parts.push(text)
+      }
+    }
+    return parts.join('')
+  }
+  if (mimeType === 'application/vnd.google-apps.spreadsheet') {
+    const sheets = google.sheets({ version: 'v4', auth })
+    const res = await sheets.spreadsheets.values.get({ spreadsheetId: fileId, range: 'A1:Z200' })
+    return (res.data.values ?? []).map((row) => row.join('\t')).join('\n')
+  }
+  if (mimeType === 'application/vnd.google-apps.presentation') {
+    const slides = google.slides({ version: 'v1', auth })
+    const res = await slides.presentations.get({ presentationId: fileId })
+    const parts: string[] = []
+    for (const slide of res.data.slides ?? []) {
+      for (const el of slide.pageElements ?? []) {
+        const textEls = (
+          el.shape?.text as { textElements?: Array<{ textRun?: { content?: string } }> } | undefined
+        )?.textElements ?? []
+        for (const te of textEls) {
+          if (te.textRun?.content) parts.push(te.textRun.content)
+        }
+      }
+    }
+    return parts.join('\n')
+  }
+  if (
+    mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    mimeType === 'application/msword'
+  ) {
+    const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' })
+    const buffer = Buffer.from(res.data as ArrayBuffer)
+    const result = await mammoth.extractRawText({ buffer })
+    return result.value
+  }
+  if (mimeType === 'text/plain') {
+    const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'text' })
+    return typeof res.data === 'string' ? res.data : ''
+  }
+  console.warn(`[drive] "${name}" unsupported mimeType: ${mimeType}`)
+  return ''
+}
+
+async function readSingleFile(fileId: string): Promise<DriveFileWithContent[]> {
+  if (!DRIVE_ID_RE.test(fileId)) throw new Error(`Invalid fileId: ${fileId}`)
+  const auth = createDriveAuth()
+  const drive = google.drive({ version: 'v3', auth })
+
+  console.log(`[drive] fetching file: id=${fileId}`)
+  const meta = await drive.files.get({ fileId, fields: 'id, name, mimeType' })
+  const file = meta.data
+  console.log(`[drive] reading "${file.name}" (${file.mimeType})`)
+
+  try {
+    const raw = await extractFileContent(fileId, file.mimeType!, file.name!, auth, drive)
+    if (!raw.trim()) {
+      console.warn(`[drive] "${file.name}" → empty content`)
+      return []
+    }
+    const truncated = raw.length > MAX_CONTENT_CHARS
+    const content = truncated ? `${raw.slice(0, MAX_CONTENT_CHARS)}\n...[truncated]` : raw
+    console.log(`[drive] "${file.name}" → ${content.length} chars${truncated ? ' (truncated)' : ''}`)
+    return [{ id: file.id!, name: file.name!, content }]
+  } catch (err) {
+    console.error(`[drive] "${file.name}" read error:`, err instanceof Error ? err.message : String(err))
+    return []
+  }
+}
+
+async function readDriveFolder(folderId: string): Promise<DriveFileWithContent[]> {
   if (!DRIVE_ID_RE.test(folderId)) throw new Error(`Invalid folderId: ${folderId}`)
   const auth = createDriveAuth()
   const drive = google.drive({ version: 'v3', auth })
 
+  console.log(`[drive] scanning folder: ${folderId}`)
   const filesRes = await drive.files.list({
-    q: `'${folderId}' in parents and name contains 'requirement' and trashed = false`,
+    q: `'${folderId}' in parents and trashed = false`,
     fields: 'files(id, name, mimeType)',
     pageSize: 50,
   })
 
-  const parts: string[] = []
-  const readFiles: DriveFile[] = []
+  const found = filesRes.data.files ?? []
+  console.log(`[drive] found ${found.length} file(s):`, found.map((f) => f.name).join(', ') || '(none)')
 
-  for (const file of filesRes.data.files ?? []) {
+  const results: DriveFileWithContent[] = []
+  for (const file of found) {
+    console.log(`[drive] reading "${file.name}" (${file.mimeType}) id=${file.id}`)
     try {
-      let content = ''
-
-      if (file.mimeType === 'application/vnd.google-apps.document') {
-        const docs = google.docs({ version: 'v1', auth })
-        const doc = await docs.documents.get({ documentId: file.id! })
-        const textParts: string[] = []
-        for (const el of doc.data.body?.content ?? []) {
-          for (const pe of el.paragraph?.elements ?? []) {
-            const text = (pe as { textRun?: { content?: string } }).textRun?.content
-            if (text) textParts.push(text)
-          }
-        }
-        content = textParts.join('')
-      } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-        const sheets = google.sheets({ version: 'v4', auth })
-        const res = await sheets.spreadsheets.values.get({
-          spreadsheetId: file.id!,
-          range: 'A1:Z200',
-        })
-        content = (res.data.values ?? []).map((row) => row.join('\t')).join('\n')
-      } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
-        const slides = google.slides({ version: 'v1', auth })
-        const res = await slides.presentations.get({ presentationId: file.id! })
-        const textParts: string[] = []
-        for (const slide of res.data.slides ?? []) {
-          for (const el of slide.pageElements ?? []) {
-            const textEls = (
-              el.shape?.text as { textElements?: Array<{ textRun?: { content?: string } }> } | undefined
-            )?.textElements ?? []
-            for (const te of textEls) {
-              if (te.textRun?.content) textParts.push(te.textRun.content)
-            }
-          }
-        }
-        content = textParts.join('\n')
-      } else if (
-        file.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-        file.mimeType === 'application/msword'
-      ) {
-        // .docx / .doc — ดาวน์โหลด raw bytes แล้วใช้ mammoth แปลงเป็น text
-        const res = await drive.files.get(
-          { fileId: file.id!, alt: 'media' },
-          { responseType: 'arraybuffer' },
-        )
-        const buffer = Buffer.from(res.data as ArrayBuffer)
-        const result = await mammoth.extractRawText({ buffer })
-        content = result.value
-      } else if (file.mimeType === 'text/plain') {
-        // plain text — ดาวน์โหลดตรงๆ
-        const res = await drive.files.get(
-          { fileId: file.id!, alt: 'media' },
-          { responseType: 'text' },
-        )
-        content = typeof res.data === 'string' ? res.data : ''
+      const raw = await extractFileContent(file.id!, file.mimeType!, file.name!, auth, drive)
+      if (!raw.trim()) {
+        console.warn(`[drive] "${file.name}" → empty content, skipped`)
+        continue
       }
-
-      if (content.trim().length > 0) {
-        parts.push(`=== ${file.name} ===\n${content}`)
-        readFiles.push({ id: file.id!, name: file.name! })
-      }
-    } catch {
-      // skip unreadable files
+      const truncated = raw.length > MAX_CONTENT_CHARS
+      const content = truncated ? `${raw.slice(0, MAX_CONTENT_CHARS)}\n...[truncated]` : raw
+      console.log(`[drive] "${file.name}" → ${content.length} chars${truncated ? ' (truncated)' : ''}`)
+      results.push({ id: file.id!, name: file.name!, content })
+    } catch (err) {
+      console.error(`[drive] "${file.name}" read error:`, err instanceof Error ? err.message : String(err))
     }
   }
 
-  const full = parts.join('\n\n')
-  const content = full.length > MAX_CONTENT_CHARS ? `${full.slice(0, MAX_CONTENT_CHARS)}\n...[truncated]` : full
-  return { content, files: readFiles }
+  console.log(`[drive] files ready: ${results.length}/${found.length}`)
+  return results
 }
 
-async function moveFilesToBackup(files: DriveFile[], sourceFolderId: string, dateStr: string): Promise<string[]> {
+async function moveFilesToBackup(files: DriveFileWithContent[], sourceFolderId: string, dateStr: string): Promise<string[]> {
   if (files.length === 0) return []
   const auth = createDriveAuth()
   const drive = google.drive({ version: 'v3', auth })
@@ -283,7 +317,7 @@ export async function runPlan(): Promise<PlanResult> {
   const notionToken = process.env.NOTION_TOKEN
   if (!notionToken) throw new Error('NOTION_TOKEN required')
 
-  const projects = getProjects().filter((p) => p.google_drive_folder_id !== undefined)
+  const projects = getProjects().filter((p) => p.google_drive_file_id ?? p.google_drive_folder_id)
   if (projects.length === 0) {
     return { status: 'no_projects_with_drive', total_created: 0, summary: [] }
   }
@@ -294,29 +328,54 @@ export async function runPlan(): Promise<PlanResult> {
   const today = `${now.toISOString().slice(0, 10)}_${now.toTimeString().slice(0, 8).replace(/:/g, '')}`  // YYYY-MM-DD_HHmmss
 
   for (const project of projects) {
+    console.log(`\n[run-plan] ── project: ${project.notion_db_id} ──`)
     try {
-      const { content: driveContent, files: driveFiles } = await readDriveFolder(project.google_drive_folder_id!)
-      if (driveContent.trim().length === 0) continue
+      const fileId = project.google_drive_file_id
+      const folderId = project.google_drive_folder_id
+      console.log(`[run-plan] step 1/3 — reading Google Drive ${fileId ? `file: ${fileId}` : `folder: ${folderId}`}`)
 
-      const userPrompt = [
-        'Google Drive files:',
-        driveContent,
-        '',
-        'Create a task plan from the content above.',
-        'Return only JSON array.',
-      ].join('\n')
+      const driveFiles = fileId
+        ? await readSingleFile(fileId)
+        : await readDriveFolder(folderId!)
 
-      const brainOutput = await callBrain(PLAN_SYSTEM_PROMPT, userPrompt)
-      const tasks = validatePlannedTasks(extractJsonArray(brainOutput))
-
-      const created: string[] = []
-      for (const task of tasks) {
-        const id = await createNotionTask(notion, project.notion_db_id, task)
-        created.push(`[${task.type}] P${task.priority} ${task.title} (${id})`)
+      if (driveFiles.length === 0) {
+        console.log(`[run-plan] no files with content, skipping project`)
+        continue
       }
 
-      // backup + rename ด้วยวันที่ หลังจากสร้าง task เสร็จแล้ว
-      const moved = await moveFilesToBackup(driveFiles, project.google_drive_folder_id!, today)
+      console.log(`[run-plan] step 2/3 — processing ${driveFiles.length} file(s) through brain (one by one)`)
+      const created: string[] = []
+
+      for (const file of driveFiles) {
+        console.log(`[run-plan]   brain ← "${file.name}" (${file.content.length} chars)`)
+        try {
+          const userPrompt = [
+            `File: ${file.name}`,
+            '',
+            file.content,
+            '',
+            'Extract ALL tasks from this document. Return only JSON array.',
+          ].join('\n')
+
+          const brainOutput = await callBrain(PLAN_SYSTEM_PROMPT, userPrompt)
+          const tasks = validatePlannedTasks(extractJsonArray(brainOutput))
+          console.log(`[run-plan]   brain → ${tasks.length} task(s) from "${file.name}"`)
+
+          for (const task of tasks) {
+            const id = await createNotionTask(notion, project.notion_db_id, task)
+            const entry = `[${task.type}] P${task.priority} ${task.title} (${id})`
+            console.log(`[run-plan]     ✓ ${entry}`)
+            created.push(entry)
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`[run-plan]   brain error for "${file.name}": ${msg}`)
+        }
+      }
+
+      console.log(`[run-plan] step 3/3 — backup ${driveFiles.length} file(s)`)
+      const moved = folderId ? await moveFilesToBackup(driveFiles, folderId, today) : []
+      console.log(`[run-plan] done — ${created.length} task(s) created, ${moved.length} file(s) backed up`)
 
       summary.push({ project: project.notion_db_id, tasks: created, moved })
     } catch (err) {
