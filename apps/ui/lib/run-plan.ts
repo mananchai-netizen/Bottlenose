@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { Client as NotionClient } from '@notionhq/client'
 import { google } from 'googleapis'
+import mammoth from 'mammoth'
 import { callBrain } from './call-brain'
 
 const PLAN_SYSTEM_PROMPT = `You are Han AI planning agent. Extract tasks from Google Drive content.
@@ -9,7 +10,7 @@ Each task: {"title":"...","type":"dev|doc|sheet|slide","status":"New","priority"
 Rules: use content only, no duplicates, keep context under 100 chars, max 8 tasks.
 - Keep titles concise and imperative.`
 
-const MAX_CONTENT_CHARS = 30_000
+const MAX_CONTENT_CHARS = 8_000
 const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{25,44}$/
 
 interface CloudProject {
@@ -25,15 +26,6 @@ interface PlannedTask {
   context: string
 }
 
-interface DriveFileRead {
-  id: string
-  name: string
-}
-
-interface ReadDriveFolderResult {
-  content: string
-  files: DriveFileRead[]
-}
 
 export interface PlanResult {
   status: string
@@ -60,7 +52,10 @@ function createDriveAuth() {
   return oauth2
 }
 
-async function readDriveFolder(folderId: string): Promise<ReadDriveFolderResult> {
+interface DriveFile { id: string; name: string }
+interface ReadResult { content: string; files: DriveFile[] }
+
+async function readDriveFolder(folderId: string): Promise<ReadResult> {
   if (!DRIVE_ID_RE.test(folderId)) throw new Error(`Invalid folderId: ${folderId}`)
   const auth = createDriveAuth()
   const drive = google.drive({ version: 'v3', auth })
@@ -72,7 +67,7 @@ async function readDriveFolder(folderId: string): Promise<ReadDriveFolderResult>
   })
 
   const parts: string[] = []
-  const readFiles: DriveFileRead[] = []
+  const readFiles: DriveFile[] = []
 
   for (const file of filesRes.data.files ?? []) {
     try {
@@ -93,7 +88,7 @@ async function readDriveFolder(folderId: string): Promise<ReadDriveFolderResult>
         const sheets = google.sheets({ version: 'v4', auth })
         const res = await sheets.spreadsheets.values.get({
           spreadsheetId: file.id!,
-          range: 'A1:ZZ1000',
+          range: 'A1:Z200',
         })
         content = (res.data.values ?? []).map((row) => row.join('\t')).join('\n')
       } else if (file.mimeType === 'application/vnd.google-apps.presentation') {
@@ -111,6 +106,25 @@ async function readDriveFolder(folderId: string): Promise<ReadDriveFolderResult>
           }
         }
         content = textParts.join('\n')
+      } else if (
+        file.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        file.mimeType === 'application/msword'
+      ) {
+        // .docx / .doc — ดาวน์โหลด raw bytes แล้วใช้ mammoth แปลงเป็น text
+        const res = await drive.files.get(
+          { fileId: file.id!, alt: 'media' },
+          { responseType: 'arraybuffer' },
+        )
+        const buffer = Buffer.from(res.data as ArrayBuffer)
+        const result = await mammoth.extractRawText({ buffer })
+        content = result.value
+      } else if (file.mimeType === 'text/plain') {
+        // plain text — ดาวน์โหลดตรงๆ
+        const res = await drive.files.get(
+          { fileId: file.id!, alt: 'media' },
+          { responseType: 'text' },
+        )
+        content = typeof res.data === 'string' ? res.data : ''
       }
 
       if (content.trim().length > 0) {
@@ -123,15 +137,16 @@ async function readDriveFolder(folderId: string): Promise<ReadDriveFolderResult>
   }
 
   const full = parts.join('\n\n')
-  const truncated = full.length > MAX_CONTENT_CHARS ? `${full.slice(0, MAX_CONTENT_CHARS)}\n...[truncated]` : full
-  return { content: truncated, files: readFiles }
+  const content = full.length > MAX_CONTENT_CHARS ? `${full.slice(0, MAX_CONTENT_CHARS)}\n...[truncated]` : full
+  return { content, files: readFiles }
 }
 
-async function moveFilesToBackup(files: DriveFileRead[], sourceFolderId: string): Promise<string[]> {
+async function moveFilesToBackup(files: DriveFile[], sourceFolderId: string, dateStr: string): Promise<string[]> {
   if (files.length === 0) return []
   const auth = createDriveAuth()
   const drive = google.drive({ version: 'v3', auth })
 
+  // หา หรือสร้าง backup folder
   const listRes = await drive.files.list({
     q: `'${sourceFolderId}' in parents and name = 'backup' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id)',
@@ -149,13 +164,21 @@ async function moveFilesToBackup(files: DriveFileRead[], sourceFolderId: string)
   const moved: string[] = []
   for (const file of files) {
     try {
+      // เปลี่ยนชื่อ: requirement.docx → requirement_2026-06-22.docx
+      const dotIdx = file.name.lastIndexOf('.')
+      const newName = dotIdx !== -1
+        ? `${file.name.slice(0, dotIdx)}_${dateStr}${file.name.slice(dotIdx)}`
+        : `${file.name}_${dateStr}`
+
       await drive.files.update({
         fileId: file.id,
         addParents: backupId,
         removeParents: sourceFolderId,
-        fields: 'id',
+        requestBody: { name: newName },
+        fields: 'id, name',
       })
-      moved.push(file.name)
+      moved.push(newName)
+      console.log(`[run-plan] backed up: ${file.name} → backup/${newName}`)
     } catch {
       // skip files that cannot be moved
     }
@@ -255,6 +278,7 @@ export async function runPlan(): Promise<PlanResult> {
 
   const notion = new NotionClient({ auth: notionToken })
   const summary: Array<{ project: string; tasks: string[]; moved: string[] }> = []
+  const today = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
 
   for (const project of projects) {
     try {
@@ -278,10 +302,8 @@ export async function runPlan(): Promise<PlanResult> {
         created.push(`[${task.type}] P${task.priority} ${task.title} (${id})`)
       }
 
-      const moved = await moveFilesToBackup(driveFiles, project.google_drive_folder_id!)
-      if (moved.length > 0) {
-        console.log(`[run-plan] moved to backup: ${moved.join(', ')}`)
-      }
+      // backup + rename ด้วยวันที่ หลังจากสร้าง task เสร็จแล้ว
+      const moved = await moveFilesToBackup(driveFiles, project.google_drive_folder_id!, today)
 
       summary.push({ project: project.notion_db_id, tasks: created, moved })
     } catch (err) {
