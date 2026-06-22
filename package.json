@@ -24,5 +24,8 @@
   },
   "devDependencies": {
     "cross-env": "^10.1.0"
+  },
+  "dependencies": {
+    "mammoth": "1.12.0"
   }
 }

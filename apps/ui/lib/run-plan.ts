@@ -278,7 +278,8 @@ export async function runPlan(): Promise<PlanResult> {
 
   const notion = new NotionClient({ auth: notionToken })
   const summary: Array<{ project: string; tasks: string[]; moved: string[] }> = []
-  const today = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
+  const now = new Date()
+  const today = `${now.toISOString().slice(0, 10)}_${now.toTimeString().slice(0, 8).replace(/:/g, '')}`  // YYYY-MM-DD_HHmmss
 
   for (const project of projects) {
     try {
