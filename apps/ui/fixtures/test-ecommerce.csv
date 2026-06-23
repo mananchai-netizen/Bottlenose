@@ -1,0 +1,12 @@
+﻿Title,Type,Priority,Context,Notes
+Migrate product catalog to microservice architecture,dev,1,แยก product service ออกจาก monolith รองรับ 10M SKU,"Node.js + gRPC, PostgreSQL, Redis cache L2"
+Implement Elasticsearch product search with Thai language support,dev,1,"full-text search, faceted filter, typo-tolerance, Thai word segmentation","ES 8.x, icu_analysis plugin, synonym dictionary"
+สร้าง recommendation engine based on browsing history,dev,2,"collaborative filtering + content-based, real-time personalization","Python FastAPI, Redis Streams, model retrain daily"
+Redesign checkout flow ลด abandoned cart rate,dev,2,"single-page checkout, address autocomplete, saved payment methods","Next.js App Router, Stripe, PromptPay QR"
+Implement A/B testing framework for UI experiments,dev,3,"server-side split, sticky session, metrics collection","Edge middleware, Vercel Analytics, statistical significance"
+เขียน architecture decision records (ADR) สำหรับ microservice migration,doc,2,บันทึกการตัดสินใจ tradeoffs ของแต่ละ service split decision,"ADR format, stored in /docs/adr, linked to PRs"
+สร้าง runbook สำหรับ on-call engineer,doc,3,incident response playbook ครอบคลุม top-10 alert scenarios,"Markdown, PagerDuty links, escalation matrix"
+จัดทำ KPI dashboard template รายสัปดาห์,sheet,2,"GMV, conversion rate, CAC, LTV, NPS — week-over-week comparison","Google Sheets, data from BigQuery via Connected Sheets"
+สร้าง capacity planning spreadsheet สำหรับ Peak season,sheet,3,"คำนวณ server capacity, cost projection สำหรับ 11.11 และ 12.12","Monte Carlo simulation, P50/P95/P99 scenarios"
+เตรียม quarterly business review presentation Q3 2026,slide,3,"revenue performance, product highlights, roadmap H2 2026","20 slides, board-level, ภาษาอังกฤษ"
+สร้าง technical deep-dive deck สำหรับ engineering all-hands,slide,4,"microservice migration progress, lessons learned, next quarter plan","30 slides, technical audience, ภาษาไทย + ภาษาอังกฤษ"

@@ -144,13 +144,19 @@ const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{25,44}$/
 function createDriveAuth() {
   const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs')
   const clientJson = process.env.GOOGLE_OAUTH_CLIENT_JSON
-  const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH
   if (!clientJson) throw new Error('GOOGLE_OAUTH_CLIENT_JSON not set')
-  if (!tokenPath || !existsSync(tokenPath)) throw new Error(`GOOGLE_OAUTH_TOKEN_PATH not found: ${tokenPath ?? '(empty)'}`)
   const clientCfg = (JSON.parse(clientJson) as { installed?: { client_id?: string; client_secret?: string }; web?: { client_id?: string; client_secret?: string } }).installed ?? (JSON.parse(clientJson) as { web?: { client_id?: string; client_secret?: string } }).web
   if (!clientCfg?.client_id || !clientCfg.client_secret) throw new Error('Invalid GOOGLE_OAUTH_CLIENT_JSON')
   const oauth2 = new google.auth.OAuth2(clientCfg.client_id, clientCfg.client_secret)
-  oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+  const tokenJson = process.env.GOOGLE_OAUTH_TOKEN_JSON
+  const tokenPath = process.env.GOOGLE_OAUTH_TOKEN_PATH
+  if (tokenJson) {
+    oauth2.setCredentials(JSON.parse(tokenJson) as object)
+  } else if (tokenPath && existsSync(tokenPath)) {
+    oauth2.setCredentials(JSON.parse(readFileSync(tokenPath, 'utf8')) as object)
+  } else {
+    throw new Error('Set GOOGLE_OAUTH_TOKEN_JSON (Vercel) or GOOGLE_OAUTH_TOKEN_PATH (local)')
+  }
   return oauth2
 }
 

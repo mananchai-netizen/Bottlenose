@@ -1,11 +1,14 @@
 const DEFAULT_OPENROUTER_MODEL = 'anthropic/claude-3.5-sonnet'
 
 // ── Infrastructure secrets — must stay in env vars ───────────────────────────
-export const CRON_SECRET = (() => {
+// Lazy getter: throws at request time, not module init — avoids 500 on all routes if env var is missing
+export function getCronSecret(): string {
   const s = process.env.CRON_SECRET ?? ''
   if (!s) throw new Error('CRON_SECRET is not set')
   return s
-})()
+}
+/** @deprecated Use getCronSecret() to avoid module-init throws */
+export const CRON_SECRET = process.env.CRON_SECRET ?? ''
 export const APP_URL = process.env.APP_URL ?? 'http://localhost:3100'
 
 // ── Sync exports — env-var only ───────────────────────────────────────────────

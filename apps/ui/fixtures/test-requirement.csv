@@ -1,0 +1,13 @@
+﻿Title,Type,Priority,Context,Notes
+สร้าง RESTful API สำหรับ product CRUD operations,dev,1,"รองรับ pagination, filtering ตาม category และ brand","Express + TypeScript, JWT auth, rate limiting"
+เพิ่ม barcode scanner integration รองรับ QR Code และ Code128,dev,2,รองรับ QR Code และ Code128 format พร้อม auto-fill product form,"Mobile-first, html5-qrcode library, offline fallback"
+ระบบ stock alert แจ้งเตือนอัตโนมัติผ่าน LINE Notify,dev,2,แจ้งเตือนเมื่อ stock ต่ำกว่า minimum threshold ต่อ SKU,"Per-SKU threshold config, daily summary digest"
+สร้าง real-time dashboard แสดง stock summary และ movement chart,dev,2,แสดง low-stock warnings และ weekly movement chart,"Chart.js, polling 30s, dark mode support"
+Implement role-based access control (RBAC),dev,3,"roles: admin, warehouse staff, viewer — จำกัด permission ต่างกัน","JWT claims, middleware guard, audit log"
+เขียน API documentation ครบทุก endpoint พร้อม examples,doc,2,พร้อม request/response examples และ error codes ทุก endpoint,"OpenAPI 3.0 spec, Swagger UI, Postman collection"
+จัดทำ user manual สำหรับ warehouse staff ภาษาไทย,doc,3,ภาษาไทย วิธีใช้ barcode scanner การรับ-จ่ายสินค้า stock count,ภาพประกอบทุกขั้นตอน ≥20 หน้า PDF
+สร้าง monthly inventory report template พร้อม formula,sheet,3,"formula คำนวณ turnover rate, dead stock, reorder point","Google Sheets, pivot table, conditional formatting"
+จัดทำ daily stock movement log template,sheet,3,บันทึก in/out transactions พร้อม running balance และ variance,"ARRAYFORMULA auto-sum, dropdown validation"
+สร้าง supplier price comparison template,sheet,4,เปรียบเทียบราคาต่อหน่วยจากหลาย supplier พร้อม recommended order qty,"VLOOKUP/XLOOKUP, sparklines"
+เตรียม slide สำหรับ project kickoff meeting ทีม warehouse,slide,4,"timeline, change management plan สำหรับทีม warehouse 20 คน","10 slides ภาษาไทย, template Hanai Blue"
+สร้าง demo presentation สำหรับ management review,slide,4,"system overview, ROI projection, go-live timeline","15 slides ภาษาอังกฤษ, executive summary first"
