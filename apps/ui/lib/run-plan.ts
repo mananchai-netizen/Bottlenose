@@ -247,7 +247,7 @@ function extractJsonArray(text: string): unknown {
 
   // 2. ดึง JSON ออกจาก code block ถ้ามี ```json ... ``` หรือ ``` ... ```
   const fenceMatch = stripped.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const candidate = fenceMatch ? fenceMatch[1].trim() : stripped.trim()
+  const candidate = fenceMatch?.[1]?.trim() ?? stripped.trim()
 
   // 3. หา [ แรก และ ] สุดท้ายในข้อความ (ข้าม text ก่อนหน้า)
   const start = candidate.indexOf('[')
