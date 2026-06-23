@@ -5,11 +5,16 @@ import type { drive_v3 } from 'googleapis'
 import mammoth from 'mammoth'
 import { callBrain } from './call-brain'
 
-const PLAN_SYSTEM_PROMPT = `You are Han AI planning agent. Extract tasks from a single document.
-Return ONLY a compact JSON array (no whitespace, no markdown, no explanation).
-Each task: {"title":"...","type":"dev|doc|sheet|slide","status":"New","priority":1,"context":"..."}
-Rules: use content only, no duplicates, keep context under 100 chars.
-Keep titles concise and imperative. Extract ALL meaningful tasks from the document.`
+const PLAN_SYSTEM_PROMPT = `You are Han AI planning agent. Extract tasks from a document.
+Output MUST start with [ and end with ] — a raw JSON array, nothing else before or after.
+No markdown, no code fences, no explanation, no thinking text outside the array.
+
+Each element: {"title":"imperative verb phrase","type":"dev","status":"New","priority":1,"context":"short reason under 80 chars"}
+type must be exactly one of: dev | doc | sheet | slide
+priority: 1=highest, 5=lowest
+
+Example output (copy this format exactly):
+[{"title":"Build login API","type":"dev","status":"New","priority":1,"context":"JWT auth for mobile app"},{"title":"Write API docs","type":"doc","status":"New","priority":2,"context":"Cover all endpoints with examples"}]`
 
 const MAX_CONTENT_CHARS = 8_000
 const DRIVE_ID_RE = /^[a-zA-Z0-9_-]{25,44}$/
@@ -237,22 +242,35 @@ function stripThinkBlocks(text: string): string {
 }
 
 function extractJsonArray(text: string): unknown {
+  // 1. ตัด <think>...</think> ออกทั้งหมด
   const stripped = stripThinkBlocks(text)
-  const trimmed = stripped.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')
-  const start = trimmed.startsWith('[') ? 0 : trimmed.indexOf('[')
+
+  // 2. ดึง JSON ออกจาก code block ถ้ามี ```json ... ``` หรือ ``` ... ```
+  const fenceMatch = stripped.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const candidate = fenceMatch ? fenceMatch[1].trim() : stripped.trim()
+
+  // 3. หา [ แรก และ ] สุดท้ายในข้อความ (ข้าม text ก่อนหน้า)
+  const start = candidate.indexOf('[')
   if (start === -1) {
-    console.error('[run-plan] brain raw output (first 500):', text.slice(0, 500))
-    throw new Error(`Brain output did not contain a JSON array. Got: "${trimmed.slice(0, 120)}"`)
+    console.error('[run-plan] brain raw output (first 800):', text.slice(0, 800))
+    throw new Error(`Brain output did not contain a JSON array. Got: "${candidate.slice(0, 200)}"`)
   }
 
-  const slice = trimmed.slice(start)
-  const end = slice.lastIndexOf(']')
+  const slice = candidate.slice(start)
+  const end   = slice.lastIndexOf(']')
 
+  // 4. พยายาม parse ตรง ๆ
   if (end !== -1) {
-    try { return JSON.parse(slice.slice(0, end + 1)) } catch { /* fall through to recovery */ }
+    try { return JSON.parse(slice.slice(0, end + 1)) } catch { /* fall through */ }
   }
 
-  const lastClose = Math.max(slice.lastIndexOf('},'), slice.lastIndexOf('}\n,'), slice.lastIndexOf('} ,'))
+  // 5. recovery: ตัดที่ object สุดท้ายที่สมบูรณ์
+  const lastClose = Math.max(
+    slice.lastIndexOf('},'),
+    slice.lastIndexOf('}\n,'),
+    slice.lastIndexOf('} ,'),
+    slice.lastIndexOf('}\n]'),
+  )
   const recovery = lastClose !== -1
     ? slice.slice(0, lastClose + 1) + ']'
     : slice.lastIndexOf('}') !== -1
@@ -267,6 +285,7 @@ function extractJsonArray(text: string): unknown {
     } catch { /* fall through */ }
   }
 
+  console.error('[run-plan] brain raw output (first 800):', text.slice(0, 800))
   throw new Error('Brain output did not contain a parseable JSON array')
 }
 
@@ -357,8 +376,25 @@ export async function runPlan(): Promise<PlanResult> {
             'Extract ALL tasks from this document. Return only JSON array.',
           ].join('\n')
 
-          const brainOutput = await callBrain(PLAN_SYSTEM_PROMPT, userPrompt)
-          const tasks = validatePlannedTasks(extractJsonArray(brainOutput))
+          let brainOutput = await callBrain(PLAN_SYSTEM_PROMPT, userPrompt)
+          let tasks: PlannedTask[] | null = null
+
+          // retry 1 ครั้งถ้า parse ไม่ได้ — ส่ง output เดิมกลับให้ brain แก้
+          try {
+            tasks = validatePlannedTasks(extractJsonArray(brainOutput))
+          } catch {
+            console.warn(`[run-plan]   parse failed for "${file.name}", retrying with fix prompt…`)
+            const fixPrompt = [
+              'Your previous response could not be parsed as a JSON array.',
+              'Previous response:',
+              brainOutput.slice(0, 1000),
+              '',
+              'Return ONLY the JSON array now, starting with [ and ending with ]. No other text.',
+            ].join('\n')
+            brainOutput = await callBrain(PLAN_SYSTEM_PROMPT, fixPrompt)
+            tasks = validatePlannedTasks(extractJsonArray(brainOutput))
+          }
+
           console.log(`[run-plan]   brain → ${tasks.length} task(s) from "${file.name}"`)
 
           for (const task of tasks) {

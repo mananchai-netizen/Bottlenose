@@ -44,7 +44,7 @@ function getProjects(): Array<{ google_drive_folder_id?: string }> {
   try { return JSON.parse(process.env.HAN_PROJECTS_JSON ?? '[]') } catch { return [] }
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+async function handleRenew(request: NextRequest): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET
   if (!secret) return NextResponse.json({ error: 'CRON_SECRET not set' }, { status: 500 })
   if (request.headers.get('authorization') !== `Bearer ${secret}`) {
@@ -112,5 +112,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const newRecords = JSON.stringify(renewed)
   console.log('[renew-watch] update DRIVE_CHANNEL_RECORDS env var to:', newRecords)
 
-  return NextResponse.json({ status: 'ok', renewed })
+  return NextResponse.json({ status: 'ok', renewed, new_records: newRecords })
+}
+
+// Vercel cron ส่ง GET — ต้องรองรับทั้ง GET และ POST
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  return handleRenew(request)
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  return handleRenew(request)
 }

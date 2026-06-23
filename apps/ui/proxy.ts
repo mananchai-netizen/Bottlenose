@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateSessionToken, COOKIE_NAME, ROLE_ALLOWED_PATHS } from '@/lib/auth-edge';
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/notion/webhook', '/api/drive/webhook', '/api/han/'];
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/notion/webhook', '/api/drive/webhook', '/api/han/', '/api/cron/'];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
